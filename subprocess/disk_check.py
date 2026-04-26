@@ -1,37 +1,61 @@
 import subprocess
+import sys
+import argparse
 
-def check_disk_usage(threshold=90):
-    # Запускаем команду 'df -h /' (проверяем корневой раздел)
-    # capture_output=True — чтобы перехватить вывод в переменную
-    # text=True — чтобы вывод был строкой, а не байтами
-    result = subprocess.run(['df', '-h', '/'], capture_output=True, text=True)
+
+def check_disk_usage(paths: list[str], threshold: int) -> int:
+    cmd = ["df", "-h"] + paths
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
-        print(f"Ошибка df: {result.stderr.strip()}")
-        return
+        print(f"[ERROR] df failed: {result.stderr.strip()}", file=sys.stderr)
+        return 1
 
-    # Вывод выглядит примерно так:
-    # Filesystem      Size  Used Avail Use% Mounted on
-    # /dev/sda1       50G   25G   25G  50% /
-    lines = result.stdout.strip().split('\n')
+    lines = result.stdout.strip().split("\n")
+    alarms = 0
 
-    # Берем строку с / (смотрим по последней колонке, а не по позиции)
-    # Это защищает от случая когда длинное имя устройства переносит строку
-    data_line = next((l for l in lines[1:] if l.split()[-1] == '/'), None)
-    if not data_line:
-        print("Не удалось найти корневой раздел в выводе df.")
-        return
+    for line in lines[1:]:
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        mount = parts[-1]
+        usage_str = parts[-2].replace("%", "")
+        try:
+            usage = int(usage_str)
+        except ValueError:
+            continue
 
-    # Предпоследняя колонка — процент использования ("50%")
-    usage_str = data_line.split()[-2]
-    usage_percent = int(usage_str.replace('%', ''))
+        if usage >= threshold:
+            print(f"🔴 ALARM  {mount:<20} {usage}% (threshold: {threshold}%)")
+            alarms += 1
+        else:
+            print(f"🟢 OK     {mount:<20} {usage}%")
 
-    print(f"Текущая загрузка диска: {usage_percent}%")
+    return 1 if alarms else 0
 
-    if usage_percent > threshold:
-        print(f"🔴 ALARM: Диск заполнен более чем на {threshold}%!")
-    else:
-        print("🟢 OK: Места достаточно.")
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Check disk usage and alert if threshold is exceeded."
+    )
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        default=["/",''],
+        metavar="PATH",
+        help="Mount points to check (default: /)",
+    )
+    parser.add_argument(
+        "-t", "--threshold",
+        type=int,
+        default=85,
+        metavar="PCT",
+        help="Alert threshold in percent (default: 85)",
+    )
+    args = parser.parse_args()
+    paths = [p for p in args.paths if p]
+    return check_disk_usage(paths or ["/"], args.threshold)
+
 
 if __name__ == "__main__":
-    check_disk_usage()
+    sys.exit(main())

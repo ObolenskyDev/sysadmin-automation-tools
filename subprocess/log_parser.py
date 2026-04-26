@@ -1,54 +1,90 @@
-# Функция для поиска ошибок в лог-файле
-def scan_logs(log_path, keyword="ERROR"):
-    print(f"--- Начинаю сканирование файла: {log_path} ---")
-    
-    found_errors = 0 # Счетчик найденных ошибок
-    
+import sys
+import re
+import argparse
+from collections import defaultdict
+
+
+def scan_log(filepath, keywords, context=2, case_sensitive=False):
+    flags = 0 if case_sensitive else re.IGNORECASE
+    patterns = [re.compile(re.escape(kw), flags) for kw in keywords]
+
     try:
-        # 'with open' — это контекстный менеджер.
-        # Он сам закроет файл, даже если внутри произойдет ошибка.
-        # 'r' — режим чтения (read).
-        # encoding='utf-8' — важно указывать кодировку, чтобы не словить кракозябры.
-        with open(log_path, 'r', encoding='utf-8') as file:
-            
-            # enumerate позволяет нам получать не только строку, но и её номер (i)
-            # start=1 — чтобы нумерация шла с 1, а не с 0 (удобнее для человека)
-            for line_number, line in enumerate(file, start=1):
-                
-                # line.strip() убирает лишние пробелы и перенос строки (\n) в конце
-                clean_line = line.strip()
-                
-                # Проверяем, есть ли ключевое слово (например, "ERROR") в этой строке
-                if keyword in clean_line:
-                    print(f"Найден {keyword} на строке {line_number}: {clean_line}")
-                    found_errors += 1
-                    
-        print(f"--- Сканирование завершено. Найдено ошибок: {found_errors} ---")
-
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
     except FileNotFoundError:
-        print("ОШИБКА: Файл логов не найден! Проверьте путь.")
-    except Exception as e:
-        print(f"Неизвестная ошибка: {e}")
+        print(f"[ERROR] File not found: {filepath}", file=sys.stderr)
+        return 1
 
-# Создадим для теста фейковый лог, чтобы скрипту было что читать
-def create_dummy_log():
-    dummy_name = "server.log"
-    with open(dummy_name, "w", encoding="utf-8") as f:
-        f.write("INFO: Сервер запущен\n")
-        f.write("INFO: Пользователь вошел\n")
-        f.write("ERROR: Соединение разорвано (Timeout)\n") # Вот это мы ищем
-        f.write("INFO: Повторная попытка\n")
-        f.write("CRITICAL ERROR: Диск отвалился!\n") # И это тоже
-    return dummy_name
+    match_lines = set()
+    for i, line in enumerate(lines):
+        if any(p.search(line) for p in patterns):
+            match_lines.add(i)
+
+    if not match_lines:
+        print(f"[OK] No matches for {keywords} in {filepath}")
+        return 0
+
+    counts = defaultdict(int)
+    printed = set()
+
+    for idx in sorted(match_lines):
+        start = max(0, idx - context)
+        end = min(len(lines) - 1, idx + context)
+        block = range(start, end + 1)
+
+        if any(b in printed for b in block):
+            continue
+
+        print(f"\n--- match at line {idx + 1} ---")
+        for i in block:
+            prefix = ">> " if i in match_lines else "   "
+            print(f"{prefix}{i + 1:>6}: {lines[i].rstrip()}")
+            printed.add(i)
+
+        for p, kw in zip(patterns, keywords):
+            if p.search(lines[idx]):
+                counts[kw] += 1
+
+    print(f"\n--- summary: {filepath} ---")
+    for kw in keywords:
+        print(f"  {kw}: {counts[kw]} match(es)")
+
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Scan log files for error keywords with context lines."
+    )
+    parser.add_argument("file", help="Path to log file")
+    parser.add_argument(
+        "-k", "--keywords",
+        nargs="+",
+        default=["ERROR", "CRITICAL", "FATAL"],
+        metavar="KW",
+        help="Keywords to search for (default: ERROR CRITICAL FATAL)",
+    )
+    parser.add_argument(
+        "-C", "--context",
+        type=int,
+        default=2,
+        metavar="N",
+        help="Lines of context around each match (default: 2)",
+    )
+    parser.add_argument(
+        "-s", "--case-sensitive",
+        action="store_true",
+        help="Case-sensitive search (default: case-insensitive)",
+    )
+    args = parser.parse_args()
+
+    return scan_log(
+        args.file,
+        keywords=args.keywords,
+        context=args.context,
+        case_sensitive=args.case_sensitive,
+    )
+
 
 if __name__ == "__main__":
-    # 1. Создаем тестовый файл
-    log_file = create_dummy_log()
-    
-    # 2. Запускаем наш сканер
-    scan_logs(log_file, keyword="ERROR")
-    
-    # 3. Убираем за собой (можно закомментировать, если хочешь посмотреть файл)
-    import os
-    if os.path.exists(log_file):
-        os.remove(log_file)
+    sys.exit(main())
