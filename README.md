@@ -2,27 +2,33 @@
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=flat&logo=python)
 
-Небольшой набор Python-скриптов для автоматизации рутинных задач. Всё на стандартной библиотеке, без внешних зависимостей.
+Python scripts for routine sysadmin tasks. No external dependencies — standard library only.
 
-## Скрипты
+## Scripts
 
-**`data_integrity.py`** — проверка целостности файлов через SHA-256. Читает файл блоками по 4096 байт — корректно работает с большими файлами без перегрузки RAM. Полезно для валидации бэкапов и миграций данных.
+**`log_parser.py`** — scan log files for error keywords with context lines and a per-keyword match summary. Supports multiple keywords, case-insensitive search, and configurable context lines (`-C`).
 
-**`disk_check.py`** — мониторинг заполненности диска через `subprocess` + парсинг вывода `df`. Алерт при превышении порога (по умолчанию 90%). Удобен как pre-flight check перед нагрузочными тестами.
+**`disk_check.py`** — check disk usage on one or more mount points and alert when usage exceeds a threshold. Useful as a pre-flight check before backups or deployments.
 
-**`log_parser.py`** — построчный поиск по лог-файлу с подсчётом совпадений. Принимает ключевое слово (`ERROR`, `CRITICAL`, `panic` и т.д.), выводит номера строк.
+**`data_integrity.py`** — generate and verify SHA256 file integrity manifests. `generate` hashes all files in a directory and saves a JSON manifest; `verify` re-hashes and reports any changed or missing files.
 
-## Запуск
+## Usage
 
 ```bash
-# Проверка диска
-python3 subprocess/disk_check.py
+# Scan a log for errors (default: ERROR, CRITICAL, FATAL)
+python3 scripts/log_parser.py /var/log/syslog
 
-# Демонстрация обнаружения повреждения файла
-python3 subprocess/data_integrity.py
+# Custom keywords with 3 lines of context
+python3 scripts/log_parser.py /var/log/app.log -k WARN TIMEOUT -C 3
 
-# Поиск ошибок в логе
-python3 subprocess/log_parser.py
+# Check disk usage (alert at 85%)
+python3 scripts/disk_check.py / /var/log --threshold 85
+
+# Generate integrity manifest for a directory
+python3 scripts/data_integrity.py generate /etc/nginx -o nginx_manifest.json
+
+# Verify files against saved manifest
+python3 scripts/data_integrity.py verify nginx_manifest.json
 ```
 
-Внешние библиотеки не нужны — только Python 3.
+No external libraries required — Python 3.8+.
